@@ -1,0 +1,89 @@
+stages:
+   - test
+   - build
+   - tag
+   - deploy
+
+variables:
+   GIT_SSL_NO_VERIFY: "true"
+   DOCKER_DRIVER: overlay2
+
+   M2: .m2
+   MAVEN_CLI_OPTS: "-s ../gitlab-credentials/ci/settings.xml --batch-mode"
+   MAVEN_OPTS: "-Dmaven.repo.local=$M2/repository"
+
+   PROJECT: digivoxbr/citrus-cloud-api-ticket
+cache:
+   key: M2
+   paths:
+      - .m2
+
+before_script:
+   - curl http://dev.digivox.com.br/ci-setup | /bin/bash
+
+################################## Base Citrus Cloud API V1
+
+Test Base Citrus Cloud API V1:
+   stage: test
+   tags:
+      - docker-java19
+   script:
+      - echo "--- $GITLAB_USERNAME === $GITLAB_PASSWORD"
+      - ./mvnw clean $MAVEN_CLI_OPTS test
+   allow_failure: true
+   except:
+      - tags
+
+Build Base Citrus Cloud API V1:
+   stage: build
+   tags:
+      - docker-java19
+   script:
+      - docker build -t $PROJECT .
+      - docker-push --image=$PROJECT --tag=$CI_COMMIT_REF_NAME
+   allow_failure: false
+   except:
+      - tags
+   only:
+      - main
+      - /^milestone.*$/
+      - /^release.*$/
+
+Build Base Citrus Cloud API V1 Stable:
+   stage: build
+   tags:
+      - docker-java11
+   script:
+      - export VERSION=$( grep -oP '(?<=<version>).*?(?=</version>)' pom.xml | head -n 1 )
+      - docker build -t $PROJECT .
+      - docker-push --image=$PROJECT --tag=$VERSION
+   allow_failure: false
+   only:
+      - tags
+   except:
+      - branches
+
+Build Base Citrus Cloud API V1 - Feature Branch:
+   stage: build
+   tags:
+      - docker-java11
+   script:
+      - export VERSION=$( grep -oP '(?<=<version>).*?(?=</version>)' pom.xml | head -n 1 )
+      - "[[ $CI_COMMIT_REF_NAME =~ ^.*([cC][cC][xX]\\-?[0-9]+).*$ ]] && export VERSION=${BASH_REMATCH[1]}"
+      - docker build -t $PROJECT .
+      - docker-push --image=$PROJECT --tag=$VERSION
+   allow_failure: false
+   only:
+      - /^.*[cC][cC][xX]\-?[0-9]+.*$/
+
+Tag:
+   stage: tag
+   cache: {}
+   script:
+      - export TAG=v$( grep -oP '(?<=<version>).*?(?=</version>)' pom.xml | head -n 1 )
+      - git tag -a $TAG -m "Version created by Gitlab"
+      - git push https://$GITLAB_USERNAME:$GITLAB_PASSWORD@gitlab.digivox.com.br/citrus-cx/$PROJECT.git --tags
+   only:
+      - main
+   except:
+      - tags
